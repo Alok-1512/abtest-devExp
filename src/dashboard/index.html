@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dummy A/B Platform</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#6b7480; --line:#dfe3e8; --accent:#2f5bea; --bad:#c62828; --ok:#1b7f3b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 24px; background:var(--ink); color:#fff; font-weight:600; }
+  main { display:grid; grid-template-columns:300px 1fr; gap:20px; padding:20px 24px; max-width:1200px; margin:0 auto; }
+  @media (max-width:800px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  h3 { margin:12px 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  h3:first-child { margin-top:0; }
+  .test { margin:8px 0 2px; font-weight:600; }
+  .vbtn { display:block; width:100%; text-align:left; padding:6px 8px; margin:2px 0; border:1px solid transparent; border-radius:6px; background:none; cursor:pointer; font:inherit; color:inherit; }
+  .vbtn:hover { background:var(--bg); }
+  .vbtn.active { background:#e8eefc; border-color:var(--accent); }
+  .badge { font-size:11px; padding:1px 6px; border-radius:10px; background:var(--bg); border:1px solid var(--line); color:var(--muted); }
+  label { display:block; font-weight:600; margin:12px 0 4px; }
+  textarea { width:100%; min-height:170px; font:13px/1.4 ui-monospace,Menlo,monospace; padding:10px; border:1px solid var(--line); border-radius:6px; resize:vertical; }
+  button.save { margin-top:14px; padding:8px 18px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  #msg { margin-left:12px; font-weight:600; }
+  .err { color:var(--bad); } .ok { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td,th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>Dummy A/B Platform <span style="font-weight:400;opacity:.7">· mock dashboard</span></header>
+<main>
+  <nav class="card" id="nav">Loading…</nav>
+  <section class="card" id="editor"><p class="muted">Select a variant to edit its code.</p></section>
+</main>
+<script>
+let clients = [], sel = null; // sel = { testId, variantId }
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+async function load() {
+  const r = await fetch("/api/clients");
+  if (!r.ok) { $("nav").innerHTML = `<span class="err">${esc((await r.json()).error)}</span>`; return; }
+  clients = await r.json();
+  renderNav();
+  if (sel) renderEditor();
+}
+
+function renderNav() {
+  $("nav").innerHTML = clients.map((c) => `
+    <h3>${esc(c.name)}</h3>
+    ${c.tests.map((t) => `
+      <div class="test">${esc(t.name)} <span class="badge">${esc(t.status)}</span> <span class="muted">${esc(t.id)}</span></div>
+      ${t.variants.map((v) => `
+        <button class="vbtn ${sel && sel.testId===t.id && sel.variantId===v.id ? "active" : ""}"
+                data-t="${esc(t.id)}" data-v="${esc(v.id)}">
+          ${esc(v.name)} <span class="muted">${esc(v.id)} · v${v.version}</span>
+        </button>`).join("")}
+    `).join("")}`).join("");
+  document.querySelectorAll(".vbtn").forEach((b) => b.onclick = () => {
+    sel = { testId: b.dataset.t, variantId: b.dataset.v };
+    renderNav(); renderEditor();
+  });
+}
+
+function current() {
+  const t = clients.flatMap((c) => c.tests).find((x) => x.id === sel.testId);
+  return { t, v: t.variants.find((x) => x.id === sel.variantId) };
+}
+
+function renderEditor(msg) {
+  const { t, v } = current();
+  $("editor").innerHTML = `
+    <h3>${esc(t.name)} / ${esc(v.name)} <span class="badge">v${v.version}</span></h3>
+    <label for="js">JavaScript</label><textarea id="js" spellcheck="false">${esc(v.js)}</textarea>
+    <label for="css">CSS</label><textarea id="css" spellcheck="false">${esc(v.css)}</textarea>
+    <button class="save" id="save">Save changes</button><span id="msg"></span>
+    <h3 style="margin-top:22px">History</h3>
+    <table><tr><th>Ver</th><th>When</th><th>By</th><th>Message</th></tr>
+    ${[...v.history].reverse().map((h) => `<tr><td>v${h.version}</td><td>${esc(new Date(h.at).toLocaleString())}</td><td>${esc(h.by)}</td><td>${esc(h.message)}</td></tr>`).join("")}
+    </table>`;
+  $("save").onclick = save;
+  if (msg) setMsg(msg.text, msg.cls);
+}
+
+function setMsg(text, cls) { $("msg").textContent = text; $("msg").className = cls; }
+
+async function save() {
+  const { v } = current();
+  const r = await fetch(`/api/tests/${sel.testId}/variants/${sel.variantId}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ js: $("js").value, css: $("css").value, baseVersion: v.version }),
+  });
+  const body = await r.json();
+  if (!r.ok) { setMsg(body.error, "err"); return; }
+  await load();
+  renderEditor({ text: `Saved as v${body.version}`, cls: "ok" });
+}
+
+load();
+</script>
+</body>
+</html>

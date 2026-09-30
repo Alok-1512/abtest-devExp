@@ -2,6 +2,7 @@ import { Command } from "commander";
 import pc from "picocolors";
 import { login } from "./commands/login.js";
 import { logout } from "./commands/logout.js";
+import { push } from "./commands/push.js";
 import { pull } from "./commands/pull.js";
 import { seed } from "./commands/seed.js";
 import { tests } from "./commands/tests.js";
@@ -37,6 +38,14 @@ program
   .option("--out <dir>", "output directory", "abtests")
   .option("--force", "overwrite local changes")
   .action(pull);
+
+program
+  .command("push [path]")
+  .description("Validate and upload local edits")
+  .option("-m, --message <message>", "history message")
+  .option("--dry-run", "show what would change without pushing")
+  .option("--force", "overwrite the remote even if it changed since you pulled")
+  .action(push);
 
 program.command("seed", { hidden: true }).description("Reset mock data").action(seed);
 

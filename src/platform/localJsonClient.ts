@@ -2,11 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { AuthError, NotFoundError } from "../errors.js";
+import { AuthError, ConflictError, NotFoundError } from "../errors.js";
 import { dbPath } from "../paths.js";
 import type {
   LoginResult,
   PlatformClient,
+  PushInput,
   TestDetail,
   TestSummary,
   User,
@@ -84,7 +85,7 @@ const DUMMY_HASH = hashPassword("not-a-real-password");
 
 // ---- storage ----
 
-function readDb(): Db {
+export function readDb(): Db {
   const file = dbPath();
   let raw: string;
   try {
@@ -154,6 +155,45 @@ function findVariant(test: TestDetail, variantId: string): Variant {
   return v;
 }
 
+/**
+ * Optimistic-concurrency update, shared by the CLI client and the dashboard.
+ * Mutates `db`; the caller persists it. Do the read -> apply -> write in one
+ * synchronous stretch so nothing interleaves.
+ * A real backend would do this in a DB transaction, e.g.
+ *   UPDATE variants SET ..., version = version + 1 WHERE id = $id AND version = $base
+ * and treat 0 affected rows as a conflict.
+ */
+export function applyVariantUpdate(
+  db: Db,
+  input: PushInput & { by: string },
+): Db["tests"][number]["variants"][number] {
+  const test = db.tests.find((t) => t.id === input.testId);
+  if (!test) throw new NotFoundError(`Test "${input.testId}" not found.`);
+  const variant = test.variants.find((v) => v.id === input.variantId);
+  if (!variant) throw new NotFoundError(`Variant "${input.variantId}" not found in test ${test.id}.`);
+
+  if (!input.force && variant.version !== input.baseVersion) {
+    throw new ConflictError(
+      `Remote is at v${variant.version}, you pulled v${input.baseVersion}. ` +
+        `Run \`abctl pull ${test.id} ${variant.id} --force\` to refresh, or push with --force to overwrite.`,
+    );
+  }
+
+  const at = new Date().toISOString();
+  variant.js = input.js;
+  variant.css = input.css;
+  variant.version += 1;
+  variant.updatedAt = at;
+  variant.updatedBy = input.by;
+  variant.history.push({
+    version: variant.version,
+    at,
+    by: input.by,
+    message: input.message ?? "",
+  });
+  return variant;
+}
+
 export function createLocalJsonClient(): PlatformClient {
   return {
     async login(email, password): Promise<LoginResult> {
@@ -203,6 +243,14 @@ export function createLocalJsonClient(): PlatformClient {
       const db = readDb();
       authenticate(db, token);
       return findVariant(findTest(db, testId), variantId);
+    },
+
+    async pushVariant(token, input): Promise<Variant> {
+      const db = readDb();
+      const user = authenticate(db, token);
+      const updated = applyVariantUpdate(db, { ...input, by: user.id });
+      writeDb(db);
+      return toVariant(updated);
     },
   };
 }

@@ -42,6 +42,17 @@ export interface TestSummary {
   variants: { id: string; name: string; version: number }[];
 }
 
+export interface PushInput {
+  testId: string;
+  variantId: string;
+  js: string;
+  css: string;
+  /** The version the developer pulled. */
+  baseVersion: number;
+  message?: string;
+  force?: boolean;
+}
+
 /**
  * The only surface commands may use to talk to the platform.
  * localJsonClient implements it against db.json; an httpClient would
@@ -53,4 +64,6 @@ export interface PlatformClient {
   listTests(token: string, opts?: { clientSlug?: string }): Promise<TestSummary[]>;
   getTest(token: string, testId: string): Promise<TestDetail>;
   getVariant(token: string, testId: string, variantId: string): Promise<Variant>;
+  /** Throws ConflictError if the remote version != baseVersion and !force. */
+  pushVariant(token: string, input: PushInput): Promise<Variant>;
 }
