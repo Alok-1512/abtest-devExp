@@ -2,9 +2,16 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { AuthError } from "../errors.js";
+import { AuthError, NotFoundError } from "../errors.js";
 import { dbPath } from "../paths.js";
-import type { LoginResult, PlatformClient, User } from "./types.js";
+import type {
+  LoginResult,
+  PlatformClient,
+  TestDetail,
+  TestSummary,
+  User,
+  Variant,
+} from "./types.js";
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -103,6 +110,50 @@ const toUser = (u: { id: string; email: string; role: string }): User => ({
   role: u.role,
 });
 
+function authenticate(db: Db, token: string): Db["users"][number] {
+  const session = db.sessions.find((s) => s.token === token);
+  if (!session) throw new AuthError("Session is not valid. Run `abctl login`.");
+  if (new Date(session.expiresAt) <= new Date()) {
+    throw new AuthError("Session expired. Run `abctl login`.");
+  }
+  const user = db.users.find((u) => u.id === session.userId);
+  if (!user) throw new AuthError("Session is not valid. Run `abctl login`.");
+  return user;
+}
+
+const toVariant = (v: Db["tests"][number]["variants"][number]): Variant => ({
+  id: v.id,
+  name: v.name,
+  trafficPct: v.trafficPct,
+  js: v.js,
+  css: v.css,
+  version: v.version,
+  updatedAt: v.updatedAt,
+  updatedBy: v.updatedBy,
+});
+
+function findTest(db: Db, testId: string): TestDetail {
+  const t = db.tests.find((x) => x.id === testId);
+  if (!t) throw new NotFoundError(`Test "${testId}" not found. Run \`abctl tests\` to list ids.`);
+  const client = db.clients.find((c) => c.id === t.clientId)!;
+  return {
+    id: t.id,
+    name: t.name,
+    slug: t.slug,
+    status: t.status,
+    clientId: client.id,
+    clientName: client.name,
+    clientSlug: client.slug,
+    variants: t.variants.map(toVariant),
+  };
+}
+
+function findVariant(test: TestDetail, variantId: string): Variant {
+  const v = test.variants.find((x) => x.id === variantId);
+  if (!v) throw new NotFoundError(`Variant "${variantId}" not found in test ${test.id}.`);
+  return v;
+}
+
 export function createLocalJsonClient(): PlatformClient {
   return {
     async login(email, password): Promise<LoginResult> {
@@ -120,15 +171,38 @@ export function createLocalJsonClient(): PlatformClient {
     },
 
     async whoami(token): Promise<User> {
+      return toUser(authenticate(readDb(), token));
+    },
+
+    async listTests(token, opts): Promise<TestSummary[]> {
       const db = readDb();
-      const session = db.sessions.find((s) => s.token === token);
-      if (!session) throw new AuthError("Session is not valid. Run `abctl login`.");
-      if (new Date(session.expiresAt) <= new Date()) {
-        throw new AuthError("Session expired. Run `abctl login`.");
+      authenticate(db, token);
+      if (opts?.clientSlug && !db.clients.some((c) => c.slug === opts.clientSlug)) {
+        throw new NotFoundError(`Client "${opts.clientSlug}" not found.`);
       }
-      const user = db.users.find((u) => u.id === session.userId);
-      if (!user) throw new AuthError("Session is not valid. Run `abctl login`.");
-      return toUser(user);
+      return db.tests
+        .map((t) => ({ t, client: db.clients.find((c) => c.id === t.clientId)! }))
+        .filter(({ client }) => !opts?.clientSlug || client.slug === opts.clientSlug)
+        .map(({ t, client }) => ({
+          id: t.id,
+          name: t.name,
+          status: t.status,
+          clientName: client.name,
+          clientSlug: client.slug,
+          variants: t.variants.map((v) => ({ id: v.id, name: v.name, version: v.version })),
+        }));
+    },
+
+    async getTest(token, testId): Promise<TestDetail> {
+      const db = readDb();
+      authenticate(db, token);
+      return findTest(db, testId);
+    },
+
+    async getVariant(token, testId, variantId): Promise<Variant> {
+      const db = readDb();
+      authenticate(db, token);
+      return findVariant(findTest(db, testId), variantId);
     },
   };
 }

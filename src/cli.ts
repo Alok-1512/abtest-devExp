@@ -2,7 +2,9 @@ import { Command } from "commander";
 import pc from "picocolors";
 import { login } from "./commands/login.js";
 import { logout } from "./commands/logout.js";
+import { pull } from "./commands/pull.js";
 import { seed } from "./commands/seed.js";
+import { tests } from "./commands/tests.js";
 import { whoami } from "./commands/whoami.js";
 import { AbctlError } from "./errors.js";
 
@@ -23,6 +25,19 @@ program
 
 program.command("logout").description("Delete the local session").action(logout);
 program.command("whoami").description("Show the logged-in user").action(whoami);
+program
+  .command("tests")
+  .description("List tests and their variant ids")
+  .option("--client <slug>", "only show tests for this client")
+  .action(tests);
+
+program
+  .command("pull <testId> [variantId]")
+  .description("Download variant code to local files")
+  .option("--out <dir>", "output directory", "abtests")
+  .option("--force", "overwrite local changes")
+  .action(pull);
+
 program.command("seed", { hidden: true }).description("Reset mock data").action(seed);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
