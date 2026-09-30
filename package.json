@@ -1,0 +1,36 @@
+{
+  "name": "abctl",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Developer CLI for an A/B testing platform",
+  "dependencies": {
+    "@inquirer/prompts": "^8.7.2",
+    "acorn": "^8.18.0",
+    "commander": "^15.0.0",
+    "ora": "^9.4.1",
+    "picocolors": "^1.1.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "type": "module",
+  "bin": {
+    "abctl": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
